@@ -1,0 +1,22 @@
+version: "3"
+
+services:
+
+  whisper:
+    build: .
+    volumes:
+    - ./cache:/root/.cache/
+    - ~/recordings:/recordings:ro
+    - ./output:/output
+    working_dir: /output
+    environment:
+    - WHISPER_PROMPT=This is a transcript of a Kubernetes training delivered by Jérôme Petazzoni, AJ Bowen, and Dana Engebretson.
+    - WHISPER_MODEL=medium
+    - WHISPER_INPUT=/recordings/2022-12-k8s/2022-12-k8s-d1-*.mp4
+    tty: True
+    command:
+    - sh
+    - -c
+    - |
+      whisper --initial_prompt "$$WHISPER_PROMPT" --model "$$WHISPER_MODEL" "$$WHISPER_INPUT"
+

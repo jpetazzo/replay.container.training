@@ -1,0 +1,9 @@
+FROM python:3.9-alpine
+RUN apk add build-base cargo ffmpeg git openssl-dev rust # cmake
+ENV USE_GLOO=0
+#RUN pip install torch --extra-index-url https://download.pytorch.org/whl/cpu
+RUN git clone --recursive https://github.com/pytorch/pytorch
+WORKDIR pytorch
+RUN python setup.py install
+RUN pip install git+https://github.com/openai/whisper.git
+
