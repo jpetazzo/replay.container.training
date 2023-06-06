@@ -1,22 +1,160 @@
 version: "3"
 
-services:
-
-  whisper:
-    build: .
+x-service-templates:
+  whisper: &whisper
+    runtime: nvidia
+    build:
+      context: .
+      dockerfile: dockerfiles/Dockerfile.multistage-venv.torchpip.ffmpegstatic
+      args:
+      - PYTORCH_PACKAGES=cu117
     volumes:
     - ./cache:/root/.cache/
-    - ~/recordings:/recordings:ro
-    - ./output:/output
-    working_dir: /output
+    - ./data:/data
+    working_dir: "/data/$DATASET"
     environment:
-    - WHISPER_PROMPT=This is a transcript of a Kubernetes training delivered by Jérôme Petazzoni, AJ Bowen, and Dana Engebretson.
-    - WHISPER_MODEL=medium
-    - WHISPER_INPUT=/recordings/2022-12-k8s/2022-12-k8s-d1-*.mp4
+    - WHISPER_PROMPT
+    - WHISPER_MODEL=large
+    - NVIDIA_VISIBLE_DEVICES=all
     tty: True
+
+services:
+
+  default:
+    image: alpine
+    command:
+    - /bin/echo
+    - |
+      This Compose file contains multiple jobs that must be executed in a specific order.
+      They are tagged with "profiles" named step-X where X is a number from 1 to N.
+      For instance, to execute step 1, run "docker-compose --profile step-1 up".
+
+  whisper-initial:
+    <<: *whisper
+    profiles: [ step-1 ]
     command:
     - sh
     - -c
     - |
-      whisper --initial_prompt "$$WHISPER_PROMPT" --model "$$WHISPER_MODEL" "$$WHISPER_INPUT"
+      mkdir -p asr
+      cd rec
+      for FILE in *.mp4; do
+        if [ -f "../asr/$$FILE.srt" ]; then
+          echo "Skipping rec/$$FILE because asr/$$FILE.srt was found."
+        else
+          whisper --initial_prompt "$$WHISPER_PROMPT" --model "$$WHISPER_MODEL" "$$FILE" --output_dir ../asr
+        fi
+      done
 
+  tesseract:
+    profiles: [ step-1 ]
+    build:
+      context: .
+      dockerfile: dockerfiles/Dockerfile.tesseract
+    volumes:
+    - ./data:/data
+    - ./extract-frames.sh:/usr/local/bin/extract-frames.sh
+    working_dir: "/data/$DATASET"
+    command:
+    - sh
+    - -c
+    - |
+      mkdir -p ocr
+      cd rec
+      for FILE in *.mp4; do
+        if [ -f "../ocr/$$FILE.ocr" ]; then
+          echo "Skipping rec/$$FILE because ocr/$$FILE.ocr was found."
+        else
+          extract-frames.sh "$$FILE" > "../ocr/$$FILE.ocr.tmp"
+          mv "../ocr/$$FILE.ocr.tmp" "../ocr/$$FILE.ocr"
+        fi
+      done
+
+  generate-toc:
+    profiles: [ step-2 ]
+    build:
+      context: .
+      dockerfile: dockerfiles/Dockerfile.python+ffmpeg
+    volumes:
+    - ./data:/data
+    - ./cache:/cache
+    working_dir: "/data/$DATASET"
+    command:
+    - sh
+    - -c
+    - |
+      if ! [ -d /cache/container.training ]; then
+        git clone https://github.com/jpetazzo/container.training /cache/container.training
+      fi
+      /cache/container.training/slides/count-slides.py slides.yml.html > toc.tsv
+
+  generate-cuesheet:
+    profiles: [ step-3 ]
+    build:
+      context: .
+      dockerfile: dockerfiles/Dockerfile.python+ffmpeg
+    volumes:
+    - ./data:/data
+    - ./generate-cue-sheet.py:/usr/local/bin/generate-cue-sheet.py
+    working_dir: "/data/$DATASET"
+    command:
+    - sh
+    - -c
+    - |
+      generate-cue-sheet.py toc.tsv ocr/*.ocr > generatedcue.tsv
+
+  edit-cuesheet:
+    profiles: [ step-4 ]
+    image: alpine
+    command: echo "Please copy 'generatedcue.tsv' to 'editedcue.tsv' and edit it."
+
+  process-cuesheet:
+    profiles: [ step-5 ]
+    build:
+      context: .
+      dockerfile: dockerfiles/Dockerfile.python+ffmpeg
+    volumes:
+    - ./cache:/cache/
+    - ./data:/data
+    - ./process-cue-sheet.py:/usr/local/bin/process-cue-sheet.py
+    working_dir: "/data/$DATASET"
+    tty: True
+    environment:
+    - NVIDIA_VISIBLE_DEVICES=all
+    - CACHE_DIR=/cache/ffmpeg
+    - OUTPUT_DIR=cut
+    command:
+    - process-cue-sheet.py
+    - editedcue.tsv
+
+  whisper-final:
+    profiles: [ step-6 ]
+    <<: *whisper
+    command:
+    - sh
+    - -c
+    - |
+      cd cut
+      for FILE in *.mp4; do
+        if [ -f "$$FILE.srt" ]; then
+          echo "Skipping cut/$$FILE because cut/$$FILE.srt was found."
+        else
+          whisper --initial_prompt "$$WHISPER_PROMPT" --model "$$WHISPER_MODEL" "$$FILE"
+        fi
+      done
+
+  generate-html:
+    profiles: [ step-7 ]
+    build:
+      context: .
+      dockerfile: dockerfiles/Dockerfile.python+ffmpeg
+    volumes:
+    - ./data:/data
+    - ./generate-html.py:/usr/local/bin/generate-html.py
+    working_dir: "/data/$DATASET"
+    command:
+    - sh
+    - -c
+    - |
+      cd cut
+      generate-html.py fr *.mp4 > index.html

@@ -1,0 +1,19 @@
+# Line-based format.
+# Lines starting with "#" are comments, and ignored.
+# Tab-separated lines.
+# - SOURCE indicates which input file to select
+# - TITLE indicates the start of a new chapter
+#   (these lines can be moved around to adjust the
+#   delineation between chapters)
+# - TEXT indicates transcribed subtitles, with timecodes
+#   (the timecodes are relative to the SOURCE file)
+SOURCE	part1.mp4
+TITLE	Introduction
+TEXT	12.5	13.2	Welcome, everyone.
+TEXT	13.4	14.8	This is the Kubernetes training.
+TITLE	Lab environments
+TEXT	15.5	19.2	We will now present the lab environments that we will use during the course.
+SOURCE	part2.mp4
+TEXT	1.5	4.2	Every student gets a 4-node Kubernetes cluster.
+
+  

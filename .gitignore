@@ -1,2 +1,4 @@
-cache
-output
+/.env
+/cache/
+/data/
+/output/
